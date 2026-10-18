@@ -1,0 +1,10 @@
+{
+  "kind": "adapter",
+  "id": "my-platform",
+  "name": "我的平台适配器",
+  "version": "0.1.0",
+  "description": "平台连接与事件收发",
+  "author": "your-github-login",
+  "license": "Apache-2.0",
+  "nuono_version": "0.4.0"
+}

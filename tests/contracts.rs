@@ -499,3 +499,23 @@ fn stale_publication_cannot_overwrite_the_catalog() {
     let root = tempfile::tempdir().unwrap();
     assert!(operations::publish(&api, &registry(), root.path(), &"a".repeat(40)).is_err());
 }
+
+#[test]
+fn typed_extensions_preserve_legacy_catalog_and_source_ownership() {
+    use nuono_registry::model::{Kind, extensions_catalog};
+    let plugin = entry();
+    let mut adapter = plugin.clone();
+    adapter.kind = Kind::Adapter;
+    assert_eq!(plugin.filename(), "test-plugin.json");
+    assert_eq!(adapter.filename(), "adapter.test-plugin.json");
+    assert!(adapter.validate(Some("test-plugin.json")).is_err());
+    assert!(adapter.validate(Some(&adapter.filename())).is_ok());
+    let entries = vec![plugin, adapter];
+    let (old, _) = catalog(&entries, None).unwrap();
+    assert_eq!(old["plugins"].as_array().unwrap().len(), 1);
+    assert!(old["plugins"][0].get("kind").is_none());
+    let (new, _) = extensions_catalog(&entries, None).unwrap();
+    assert_eq!(new["schema_version"], 2);
+    assert_eq!(new["extensions"].as_array().unwrap().len(), 2);
+    assert_eq!(new["extensions"][1]["kind"], "adapter");
+}

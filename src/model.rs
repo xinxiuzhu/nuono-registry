@@ -12,6 +12,7 @@ use std::{
 
 pub const MAX_BYTES: usize = 2 * 1024 * 1024;
 pub const METADATA_FIELDS: &[&str] = &[
+    "kind",
     "id",
     "name",
     "version",
@@ -21,9 +22,33 @@ pub const METADATA_FIELDS: &[&str] = &[
     "nuono_version",
 ];
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Kind {
+    #[default]
+    Plugin,
+    Adapter,
+}
+impl Kind {
+    pub fn directory(self) -> &'static str {
+        match self {
+            Self::Plugin => "plugins",
+            Self::Adapter => "adapters",
+        }
+    }
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::Plugin => "plugin",
+            Self::Adapter => "adapter",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Metadata {
+    #[serde(default)]
+    pub kind: Kind,
     pub id: String,
     pub name: String,
     pub version: String,
@@ -36,6 +61,8 @@ pub struct Metadata {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Entry {
+    #[serde(default)]
+    pub kind: Kind,
     pub id: String,
     pub name: String,
     pub version: String,
@@ -50,6 +77,15 @@ pub struct Entry {
 }
 
 impl Entry {
+    pub fn key(&self) -> String {
+        match self.kind {
+            Kind::Plugin => self.id.clone(),
+            Kind::Adapter => format!("adapter.{}", self.id),
+        }
+    }
+    pub fn filename(&self) -> String {
+        format!("{}.json", self.key())
+    }
     pub fn from_metadata(
         metadata: Metadata,
         repo: String,
@@ -57,6 +93,7 @@ impl Entry {
         reference: &str,
     ) -> Self {
         Self {
+            kind: metadata.kind,
             id: metadata.id,
             name: metadata.name,
             version: metadata.version,
@@ -95,10 +132,7 @@ impl Entry {
             "id 必须为小写字母、数字、连字符或下划线，不能为 hub"
         );
         if let Some(filename) = filename {
-            ensure!(
-                filename == format!("{}.json", self.id),
-                "文件名必须与 id 一致"
-            );
+            ensure!(filename == self.filename(), "文件名必须与 id 一致");
         }
         semver::Version::parse(&self.version).context("version 必须是完整 SemVer 版本")?;
         semver::Version::parse(&self.nuono_version).context("nuono_version 必须是精确版本")?;
@@ -237,13 +271,30 @@ pub fn load_entries(root: &Path) -> Result<Vec<Entry>> {
         );
         let entry: Entry = read_json(&file.path())?;
         entry.validate(Some(&name))?;
-        ensure!(ids.insert(entry.id.clone()), "重复插件 id: {}", entry.id);
+        ensure!(
+            ids.insert((entry.kind, entry.id.clone())),
+            "重复扩展 id: {}",
+            entry.id
+        );
         entries.push(entry);
     }
     Ok(entries)
 }
 
 pub fn catalog(entries: &[Entry], seed: Option<&str>) -> Result<(Value, Option<String>)> {
+    build_catalog(entries, seed, false)
+}
+pub fn extensions_catalog(
+    entries: &[Entry],
+    seed: Option<&str>,
+) -> Result<(Value, Option<String>)> {
+    build_catalog(entries, seed, true)
+}
+fn build_catalog(
+    entries: &[Entry],
+    seed: Option<&str>,
+    extensions: bool,
+) -> Result<(Value, Option<String>)> {
     let key = seed
         .filter(|seed| !seed.is_empty())
         .map(|seed| -> Result<SigningKey> {
@@ -254,8 +305,11 @@ pub fn catalog(entries: &[Entry], seed: Option<&str>) -> Result<(Value, Option<S
             Ok(SigningKey::from_bytes(&bytes))
         })
         .transpose()?;
-    let mut sorted = entries.iter().collect::<Vec<_>>();
-    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut sorted = entries
+        .iter()
+        .filter(|entry| extensions || entry.kind == Kind::Plugin)
+        .collect::<Vec<_>>();
+    sorted.sort_by(|a, b| (a.kind, &a.id).cmp(&(b.kind, &b.id)));
     let plugins = sorted
         .into_iter()
         .map(|entry| -> Result<Value> {
@@ -263,6 +317,9 @@ pub fn catalog(entries: &[Entry], seed: Option<&str>) -> Result<(Value, Option<S
             let mut value = serde_json::to_value(entry)?;
             let fields = value.as_object_mut().context("登记不是对象")?;
             fields.remove("release_tag");
+            if !extensions {
+                fields.remove("kind");
+            }
             if let Some(key) = &key {
                 let message = format!("{}\n{}", entry.repo, entry.commit);
                 fields.insert(
@@ -273,7 +330,11 @@ pub fn catalog(entries: &[Entry], seed: Option<&str>) -> Result<(Value, Option<S
             Ok(value)
         })
         .collect::<Result<Vec<_>>>()?;
-    let value = json!({"schema_version": 1, "plugins": plugins});
+    let value = if extensions {
+        json!({"schema_version":2,"extensions":plugins})
+    } else {
+        json!({"schema_version":1,"plugins":plugins})
+    };
     ensure!(
         serde_json::to_string_pretty(&value)?.len() < MAX_BYTES,
         "catalog 超过 Nuono 的 2 MiB 上限"

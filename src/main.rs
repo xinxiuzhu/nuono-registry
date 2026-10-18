@@ -23,7 +23,7 @@ enum RegistryCommand {
         #[arg(default_value = ".")]
         root: PathBuf,
     },
-    /// 生成兼容 Nuono 的 dist/catalog.json。
+    /// 生成业务插件 v1 目录与扩展 v2 目录。
     Build {
         #[arg(default_value = ".")]
         root: PathBuf,
@@ -61,7 +61,7 @@ fn execute(command: RegistryCommand) -> Result<()> {
         RegistryCommand::Build { root } => {
             let key = std::env::var("REGISTRY_SIGNING_KEY").ok();
             println!(
-                "已生成 {} 个插件的 catalog.json",
+                "已生成 {} 个扩展的版本化目录",
                 operations::build(&root, key.as_deref())?
             );
         }

@@ -1,4 +1,4 @@
-name: 投稿插件
+name: 投稿插件或适配器
 description: 提交仓库和发布版本，机器人会读取源码中的元数据并创建登记 PR。
 title: "[投稿] "
 body:
@@ -7,7 +7,7 @@ body:
       value: |
         请先把 `examples/nuono-registry.json` 复制到插件仓库根目录，填写后创建 Release。
         投稿只是进入审核；维护者合并登记 PR 后才会上架。
-        平台适配器独立安装契约尚未开放，目前投稿对象是 `nuono-plugin` 源码插件。
+        业务插件使用 `nuono-plugin` SDK；平台适配器使用 `nuono-adapter` SDK，并在元数据中填写 `"kind": "adapter"`。
   - type: input
     id: repository
     attributes:
