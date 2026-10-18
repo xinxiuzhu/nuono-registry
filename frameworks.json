@@ -1,0 +1,7 @@
+{
+  "0.4.0": {
+    "repo": "https://github.com/xinxiuzhu/Nuono.git",
+    "commit": "0f50159fed0c82173f4d403f528bef97ed844b88",
+    "toolchain": "1.99.0"
+  }
+}

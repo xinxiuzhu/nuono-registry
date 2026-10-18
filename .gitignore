@@ -1,0 +1,7 @@
+dist/
+.work/
+target/
+.env
+.env.*
+*.pem
+*.key

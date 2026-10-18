@@ -1,0 +1,9 @@
+{
+  "id": "my-plugin",
+  "name": "我的插件",
+  "version": "0.1.0",
+  "description": "简要说明插件的功能和使用场景",
+  "author": "your-github-login",
+  "license": "MIT",
+  "nuono_version": "0.4.0"
+}

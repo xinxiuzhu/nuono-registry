@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Nuono 框架问题
+    url: https://github.com/xinxiuzhu/Nuono/issues
+    about: 运行问题和框架建议请提交到 Nuono 主仓库。

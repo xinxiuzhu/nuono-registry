@@ -1,0 +1,106 @@
+name: Validate registry
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: 校验机器人创建的 PR 编号；留空校验 main
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.event.pull_request.number || inputs.pull_request || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_entries: ${{ steps.plan.outputs.has_entries }}
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      # pull_request_target 只运行受信任 base 的工具；投稿分支只当作数据读取。
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
+      - name: Build Rust registry CLI
+        run: cargo build --locked
+      - run: cargo test --locked
+      - id: resolve
+        run: target/debug/nuono-registry resolve-pr
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ steps.resolve.outputs.source_repo }}
+          ref: ${{ steps.resolve.outputs.sha }}
+          path: .candidate
+          persist-credentials: false
+      - id: plan
+        run: target/debug/nuono-registry plan .candidate
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.has_entries == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+      - name: Install registry Rust toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
+      - name: Build Rust registry CLI
+        run: cargo build --locked
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libfontconfig1-dev
+      - name: Install exact Rust toolchain
+        run: rustup toolchain install "$TOOLCHAIN" --profile minimal
+        env:
+          TOOLCHAIN: ${{ matrix.framework.toolchain }}
+      - name: Compile and link plugin with the pinned framework
+        run: target/debug/nuono-registry check-source
+        env:
+          CHECK_ITEM: ${{ toJSON(matrix) }}
+
+  report:
+    needs: [prepare, build]
+    if: always() && needs.prepare.outputs.sha != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
+      - name: Build Rust registry CLI
+        run: cargo build --locked
+      - run: target/debug/nuono-registry report
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.prepare.outputs.sha }}
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          BUILD_RESULT: ${{ needs.build.result }}

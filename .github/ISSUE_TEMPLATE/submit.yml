@@ -1,0 +1,34 @@
+name: 投稿插件
+description: 提交仓库和发布版本，机器人会读取源码中的元数据并创建登记 PR。
+title: "[投稿] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先把 `examples/nuono-registry.json` 复制到插件仓库根目录，填写后创建 Release。
+        投稿只是进入审核；维护者合并登记 PR 后才会上架。
+        平台适配器独立安装契约尚未开放，目前投稿对象是 `nuono-plugin` 源码插件。
+  - type: input
+    id: repository
+    attributes:
+      label: 源码仓库
+      placeholder: https://github.com/your-name/your-plugin
+    validations:
+      required: true
+  - type: input
+    id: reference
+    attributes:
+      label: 发布版本或 commit
+      description: 建议填写正式 Release tag；也支持完整 40 位 commit。不会跟随分支自动更新。
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: checkboxes
+    id: agreement
+    attributes:
+      label: 投稿确认
+      options:
+        - label: 我有权提交这些登记信息，插件的许可证已明确，并已在对应 Nuono 版本中验证。
+          required: true
+        - label: 我理解登记信息按 Apache-2.0 提交，插件源码保留其自身许可证。
+          required: true

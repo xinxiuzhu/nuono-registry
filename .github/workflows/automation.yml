@@ -1,0 +1,45 @@
+name: Registry submissions and updates
+on:
+  issues:
+    types: [opened, edited]
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: registry-automation-${{ github.event.issue.number || github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    if: github.event_name != 'issues' || startsWith(github.event.issue.title, '[投稿]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
+      - name: Build Rust registry CLI
+        run: cargo build --locked
+      # 本任务只读取公开的元数据，不检出或运行投稿源码，不自动合并 PR。
+      - name: Create submission PR
+        if: github.event_name == 'issues'
+        run: target/debug/nuono-registry submission
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Propose release updates
+        if: github.event_name != 'issues'
+        run: target/debug/nuono-registry updates
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
