@@ -2,8 +2,8 @@
 use crate::{
     github::{Api, Proposal, has_status, open_entry_pull_request, submit_issue, text},
     model::{
-        Entry, Framework, Frameworks, METADATA_FIELDS, Metadata, Repository, catalog, is_commit,
-        load_entries, read_json, validate_frameworks,
+        Entry, Framework, Frameworks, METADATA_FIELDS, Metadata, Repository, catalog,
+        extensions_catalog, is_commit, load_entries, read_json, validate_frameworks,
     },
 };
 use anyhow::{Context, Result, ensure};
@@ -30,6 +30,7 @@ pub fn validate(root: &Path) -> Result<Vec<Entry>> {
         );
     }
     catalog(&entries, None)?;
+    extensions_catalog(&entries, None)?;
     Ok(entries)
 }
 
@@ -46,6 +47,11 @@ pub fn build(root: &Path, seed: Option<&str>) -> Result<usize> {
     fs::write(
         dist.join("catalog.json"),
         format!("{}\n", serde_json::to_string_pretty(&value)?),
+    )?;
+    let (extensions, _) = extensions_catalog(&entries, seed)?;
+    fs::write(
+        dist.join("extensions-v2.json"),
+        format!("{}\n", serde_json::to_string_pretty(&extensions)?),
     )?;
     if let Some(key) = key {
         fs::write(dist.join("signing-public-key.txt"), format!("{key}\n"))?;
@@ -171,7 +177,11 @@ pub fn publish(api: &impl Api, registry: &Repository, root: &Path, source_sha: &
     let dist = root.join("dist");
     let _: Value = read_json(&dist.join("catalog.json"))?;
     let mut tree = Vec::new();
-    for file in ["catalog.json", "signing-public-key.txt"] {
+    for file in [
+        "catalog.json",
+        "extensions-v2.json",
+        "signing-public-key.txt",
+    ] {
         let path = dist.join(file);
         if file == "signing-public-key.txt" && !path.try_exists()? {
             continue;
@@ -298,7 +308,7 @@ pub fn updates(api: &impl Api, registry: &Repository, root: &Path) -> Result<()>
         let Some(tag) = &entry.release_tag else {
             continue;
         };
-        let prefix = format!("updates/{}-", entry.id);
+        let prefix = format!("updates/{}-", entry.key());
         if pending.iter().any(|pull| {
             pull["head"]["ref"]
                 .as_str()
@@ -322,7 +332,7 @@ pub fn updates(api: &impl Api, registry: &Repository, root: &Path) -> Result<()>
                 return Ok(());
             }
             ensure!(
-                next.id == entry.id,
+                next.kind == entry.kind && next.id == entry.id,
                 "{} 的新 Release 改变了插件 id",
                 entry.id
             );
@@ -330,7 +340,7 @@ pub fn updates(api: &impl Api, registry: &Repository, root: &Path) -> Result<()>
                 api,
                 registry,
                 Proposal {
-                    branch: &format!("updates/{}-{}", entry.id, &next.commit[..12]),
+                    branch: &format!("updates/{}-{}", entry.key(), &next.commit[..12]),
                     title: &format!("更新 {} → {}", entry.name, next.version),
                     body: &format!(
                         "发现新的正式 Release：{}\n\n原提交：{}\n新提交：{}\n\n这是更新建议，合并前请检查源码变化和 Registry validation 结果。",
@@ -418,13 +428,13 @@ pub fn check_source(item: PlanItem) -> Result<()> {
         entry.nuono_version.clone(),
         framework.clone(),
     )]))?;
-    let work = Path::new(".work").join(format!("{}-{}", entry.id, &entry.commit[..12]));
+    let work = Path::new(".work").join(format!("{}-{}", entry.key(), &entry.commit[..12]));
     fs::create_dir_all(&work)?;
     let work = work.canonicalize()?;
     let host = work.join("Nuono");
     checkout(&framework.repo, &framework.commit, &host, &work, &framework)?;
-    fs::create_dir_all(host.join("plugins"))?;
-    let source = host.join("plugins").join(&entry.id);
+    fs::create_dir_all(host.join(entry.kind.directory()))?;
+    let source = host.join(entry.kind.directory()).join(&entry.id);
     checkout(&entry.repo, &entry.commit, &source, &work, &framework)?;
     let metadata: Metadata = read_json(&source.join("nuono-registry.json"))?;
     let metadata = serde_json::to_value(metadata)?;
@@ -442,7 +452,14 @@ pub fn check_source(item: PlanItem) -> Result<()> {
     // 只编译和导出应用，不启动宿主、插件生命周期或数据库。
     run(
         "cargo",
-        &["run", "--locked", "--", "plugin", "doctor", source],
+        &[
+            "run",
+            "--locked",
+            "--",
+            entry.kind.command(),
+            "doctor",
+            source,
+        ],
         &host,
         &framework,
     )?;

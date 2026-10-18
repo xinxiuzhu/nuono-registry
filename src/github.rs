@@ -177,7 +177,7 @@ pub fn open_entry_pull_request(
     let prefix = format!("/repos/{}", registry.full_name);
     let info = api.call("GET", &prefix, None)?;
     let base = text(&info, "default_branch")?;
-    let path = format!("{prefix}/contents/entries/{}.json", entry.id);
+    let path = format!("{prefix}/contents/entries/{}", entry.filename());
     let existing = match api.call("GET", &format!("{path}?ref={}", encode(base)), None) {
         Ok(value) => Some(value),
         Err(error) if has_status(&error, 404) => None,
@@ -187,9 +187,10 @@ pub fn open_entry_pull_request(
         let old: Entry = serde_json::from_value(decode_content(existing)?)?;
         old.validate(None)?;
         ensure!(
-            Repository::parse(&old.repo)?
-                .url
-                .eq_ignore_ascii_case(&Repository::parse(expected_repo)?.url),
+            old.kind == entry.kind
+                && Repository::parse(&old.repo)?
+                    .url
+                    .eq_ignore_ascii_case(&Repository::parse(expected_repo)?.url),
             "该 id 已登记给其他仓库，无法通过投稿替换归属"
         );
         if old.commit == entry.commit {
